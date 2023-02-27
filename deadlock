@@ -1,0 +1,102 @@
+	mutex m1;
+	mutex m2;
+	lock(m1, m2); // m1.lock() m2.lock()
+	// adopt_lock 이미 lock 된 상태니까 나중에 소멸될 때 풀어주기만 해
+	lock_guard<mutex> g1(m1, adopt_lock);
+	lock_guard<mutex> g2(m2, adopt_lock);
+  
+  자물쇠가 2개 있다고 생각하자!
+  그리고 거기를 순서대로 들어가도록 만들어야 deadlock을 예방 가능하다!
+  
+  스핀락 (존버 메타)
+  class SpinLock
+{
+public:
+	void lock()
+	{
+		// CAS (Compare-And-Swap)
+		bool expected = false;
+		bool desired = true;
+		// CAS 의사 코드
+		/*if (_locked == expected)
+		{
+			expected = _locked;
+			_locked = desired;
+			return true;
+		}
+		else
+		{
+			expected = _locked;
+			return false;
+		}*/
+		while (_locked.compare_exchange_strong(expected, desired) == false)
+		{
+			expected = false;
+		}
+	}
+	void unlock()
+	{
+		//_locked = false;
+		_locked.store(false);
+	}
+public:
+	atomic<bool> _locked = false; 
+};
+Event
+#include "pch.h"
+#include <iostream>
+#include "CorePch.h"
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <Windows.h>
+mutex m;
+queue<int32> q;
+HANDLE handle;
+void Producer()
+{
+	while (true)
+	{
+		unique_lock<mutex> lock(m);
+		q.push(100);
+	}
+	::SetEvent(handle);
+	this_thread::sleep_for(100ms);
+}
+void Consumer()
+{
+	while (true)
+	{
+		::WaitForSingleObject(handle, INFINITE);
+		//::ResetEvent(handle);
+
+		unique_lock<mutex> lock(m);
+		if (q.empty() == false)
+		{
+			int32 data = q.front();
+			q.pop();
+			cout << data << endl;
+		}
+	}
+}
+
+int main()
+{
+	// 커널 오브젝트
+	// Usage Count
+	// Signal (파란불) / Non-Signal(빨간불) << bool
+	// Auto / Manual << bool
+
+	handle = ::CreateEvent(NULL, FALSE, FALSE, NULL);
+
+	thread t1(Producer);
+	thread t2(Consumer);
+
+	t1.join();
+	t2.join();
+
+	::CloseHandle(handle);
+
+	return 0;
+}
+
